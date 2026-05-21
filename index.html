@@ -3,7 +3,10 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+
   <title>باوکی یەحیا - کاری ئەمڕۆ</title>
+
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 
   <style>
     * {
@@ -13,7 +16,7 @@
 
     :root {
       --bg: #f5efe7;
-      --card: rgba(255,255,255,0.9);
+      --card: rgba(255,255,255,0.93);
       --text: #24170f;
       --muted: #827062;
       --main: #8a4b24;
@@ -22,7 +25,7 @@
       --table-head: #2b1d13;
       --shadow: rgba(62,35,18,0.14);
       --border: rgba(107,53,24,0.16);
-      --input: rgba(255,255,255,0.95);
+      --input: rgba(255,255,255,0.96);
       --gradient: linear-gradient(135deg,#2b1d13,#7b3f1d,#a25b2d);
     }
 
@@ -43,7 +46,7 @@
 
     body.purple {
       --bg: #f4ecff;
-      --card: rgba(255,255,255,0.92);
+      --card: rgba(255,255,255,0.93);
       --text: #221133;
       --muted: #755d8a;
       --main: #7b2cbf;
@@ -58,7 +61,7 @@
 
     body.green {
       --bg: #eaf7ef;
-      --card: rgba(255,255,255,0.92);
+      --card: rgba(255,255,255,0.93);
       --text: #0f2b1a;
       --muted: #5e7468;
       --main: #1b7f3a;
@@ -94,7 +97,7 @@
     .login-card {
       width: 100%;
       max-width: 390px;
-      background: rgba(255,255,255,0.92);
+      background: rgba(255,255,255,0.95);
       color: #24170f;
       border-radius: 28px;
       padding: 28px;
@@ -121,6 +124,11 @@
     .login-card p {
       color: #777;
       margin: 8px 0 20px;
+    }
+
+    .login-card label {
+      color: #24170f;
+      text-align: right;
     }
 
     .login-card input {
@@ -219,18 +227,12 @@
 
     .date-box,
     .theme-box,
+    .connection,
     .stat,
     .card,
     .saved-day {
       backdrop-filter: blur(14px);
       -webkit-backdrop-filter: blur(14px);
-    }
-
-    .date-box,
-    .theme-box,
-    .stat,
-    .card,
-    .saved-day {
       background: var(--card);
       border: 1px solid var(--border);
       box-shadow: 0 14px 35px var(--shadow);
@@ -241,6 +243,14 @@
       border-radius: 20px;
       font-weight: bold;
       color: var(--accent);
+    }
+
+    .connection {
+      padding: 12px 16px;
+      border-radius: 20px;
+      font-weight: bold;
+      color: var(--accent);
+      font-size: 13px;
     }
 
     .theme-box {
@@ -511,13 +521,10 @@
       }
 
       .date-box,
-      .theme-box {
+      .theme-box,
+      .connection {
         margin-bottom: 12px;
         width: 100%;
-      }
-
-      .theme-box {
-        justify-content: space-between;
       }
 
       .theme-box select,
@@ -613,6 +620,10 @@
           <span id="todayDateText">Loading...</span>
         </div>
 
+        <div class="connection" id="connectionStatus">
+          Supabase: Waiting...
+        </div>
+
         <div class="theme-box">
           <label>Theme:</label>
           <select id="themeSelect" onchange="changeTheme(this.value)">
@@ -622,6 +633,7 @@
             <option value="green">Green</option>
           </select>
 
+          <button class="btn-blue" onclick="manualRefresh()">Refresh Data</button>
           <button class="logout-btn" onclick="logout()">Logout</button>
         </div>
       </div>
@@ -725,126 +737,41 @@
   </div>
 
   <script>
-    const DB_NAME = "hijamaLocalDatabase";
-    const DB_VERSION = 1;
-    let db;
+    const SUPABASE_URL = "https://upoxgwarbxvzwpwoytje.supabase.co";
+    const SUPABASE_KEY = "sb_publishable_0aXZvD77dxY4mbbpubhcqw_P6ShSLbV";
+
+    const supabaseClient = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
 
     let todayList = [];
     let savedReports = [];
+    let refreshTimer = null;
+    let isEditingOrSaving = false;
 
-    function openDatabase() {
-      return new Promise((resolve, reject) => {
-        const request = indexedDB.open(DB_NAME, DB_VERSION);
-
-        request.onupgradeneeded = function(event) {
-          db = event.target.result;
-
-          if (!db.objectStoreNames.contains("settings")) {
-            db.createObjectStore("settings", { keyPath: "key" });
-          }
-
-          if (!db.objectStoreNames.contains("todayList")) {
-            db.createObjectStore("todayList", { keyPath: "id" });
-          }
-
-          if (!db.objectStoreNames.contains("savedReports")) {
-            db.createObjectStore("savedReports", { keyPath: "id" });
-          }
-        };
-
-        request.onsuccess = function(event) {
-          db = event.target.result;
-          resolve(db);
-        };
-
-        request.onerror = function() {
-          reject("Database error");
-        };
-      });
+    function setConnectionStatus(text) {
+      const el = document.getElementById("connectionStatus");
+      if (el) el.textContent = text;
     }
 
-    function getAllFromStore(storeName) {
-      return new Promise((resolve) => {
-        const tx = db.transaction(storeName, "readonly");
-        const store = tx.objectStore(storeName);
-        const request = store.getAll();
-
-        request.onsuccess = () => resolve(request.result || []);
-        request.onerror = () => resolve([]);
-      });
-    }
-
-    function clearStore(storeName) {
-      return new Promise((resolve) => {
-        const tx = db.transaction(storeName, "readwrite");
-        const store = tx.objectStore(storeName);
-        const request = store.clear();
-
-        request.onsuccess = () => resolve();
-        request.onerror = () => resolve();
-      });
-    }
-
-    function putItem(storeName, item) {
-      return new Promise((resolve) => {
-        const tx = db.transaction(storeName, "readwrite");
-        const store = tx.objectStore(storeName);
-        store.put(item);
-        tx.oncomplete = () => resolve();
-        tx.onerror = () => resolve();
-      });
-    }
-
-    async function saveDatabase() {
-      await clearStore("todayList");
-      await clearStore("savedReports");
-
-      for (const person of todayList) {
-        await putItem("todayList", person);
-      }
-
-      for (const report of savedReports) {
-        await putItem("savedReports", report);
-      }
-    }
-
-    async function loadDatabase() {
-      todayList = await getAllFromStore("todayList");
-      savedReports = await getAllFromStore("savedReports");
-
-      todayList.sort((a, b) => Number(a.id) - Number(b.id));
-      savedReports.sort((a, b) => Number(b.id) - Number(a.id));
-    }
-
-    function saveSetting(key, value) {
-      return putItem("settings", { key, value });
-    }
-
-    function getSetting(key) {
-      return new Promise((resolve) => {
-        const tx = db.transaction("settings", "readonly");
-        const store = tx.objectStore("settings");
-        const request = store.get(key);
-
-        request.onsuccess = () => resolve(request.result ? request.result.value : null);
-        request.onerror = () => resolve(null);
-      });
-    }
-
-    async function login() {
+    function login() {
       const username = document.getElementById("usernameInput").value.trim();
       const password = document.getElementById("passwordInput").value.trim();
 
       if (username === "ali" && password === "ali") {
-        await saveSetting("loggedIn", "yes");
+        localStorage.setItem("hijamaLoggedIn", "yes");
         showApp();
       } else {
         alert("Username یان Password هەڵەیە");
       }
     }
 
-    async function logout() {
-      await saveSetting("loggedIn", "no");
+    function logout() {
+      localStorage.setItem("hijamaLoggedIn", "no");
+
+      if (refreshTimer) {
+        clearInterval(refreshTimer);
+        refreshTimer = null;
+      }
+
       document.getElementById("app").style.display = "none";
       document.getElementById("loginScreen").style.display = "flex";
     }
@@ -853,10 +780,20 @@
       document.getElementById("loginScreen").style.display = "none";
       document.getElementById("app").style.display = "block";
 
-      await loadDatabase();
-      await loadTheme();
+      loadTheme();
       renderDate();
+
+      await loadDatabase();
       renderToday();
+
+      if (!refreshTimer) {
+        refreshTimer = setInterval(async () => {
+          if (!isEditingOrSaving) {
+            await loadDatabase(false);
+            renderToday();
+          }
+        }, 6000);
+      }
     }
 
     function formatMoney(amount) {
@@ -887,24 +824,98 @@
         `Date: ${info.date} | Day: ${info.day}`;
     }
 
-    async function changeTheme(theme) {
+    function changeTheme(theme) {
       document.body.className = "";
 
       if (theme !== "light") {
         document.body.classList.add(theme);
       }
 
-      await saveSetting("theme", theme);
+      localStorage.setItem("hijamaTheme", theme);
     }
 
-    async function loadTheme() {
-      const theme = await getSetting("theme") || "light";
+    function loadTheme() {
+      const theme = localStorage.getItem("hijamaTheme") || "light";
       document.getElementById("themeSelect").value = theme;
 
       document.body.className = "";
       if (theme !== "light") {
         document.body.classList.add(theme);
       }
+    }
+
+    async function testSupabaseConnection() {
+      const { error } = await supabaseClient
+        .from("hijama_today")
+        .select("id")
+        .limit(1);
+
+      if (error) {
+        console.error("Supabase test error:", error);
+        setConnectionStatus("Supabase: Error");
+        alert("Supabase نەبەستراوە. SQL ـەکە Run بکە و دڵنیابە code نوێ Upload کراوە.");
+        return false;
+      }
+
+      return true;
+    }
+
+    async function loadDatabase(showLoading = true) {
+      if (showLoading) setConnectionStatus("Supabase: Loading...");
+
+      const ok = await testSupabaseConnection();
+      if (!ok) return;
+
+      const todayResult = await supabaseClient
+        .from("hijama_today")
+        .select("*")
+        .order("id", { ascending: true });
+
+      const reportResult = await supabaseClient
+        .from("hijama_reports")
+        .select("*")
+        .order("id", { ascending: false });
+
+      if (todayResult.error) {
+        console.error(todayResult.error);
+        setConnectionStatus("Supabase: Today error");
+        return;
+      }
+
+      if (reportResult.error) {
+        console.error(reportResult.error);
+        setConnectionStatus("Supabase: Reports error");
+        return;
+      }
+
+      todayList = (todayResult.data || []).map(item => ({
+        id: Number(item.id),
+        name: item.name || "",
+        phone: item.phone || "",
+        time: item.appointment_time || "",
+        service: item.service || "",
+        price: Number(item.price || 0),
+        status: item.status || "came"
+      }));
+
+      savedReports = (reportResult.data || []).map(item => ({
+        id: Number(item.id),
+        date: item.report_date || "",
+        day: item.report_day || "",
+        totalPeople: Number(item.total_people || 0),
+        camePeople: Number(item.came_people || 0),
+        missedPeople: Number(item.missed_people || 0),
+        totalMoney: Number(item.total_money || 0),
+        list: item.list || []
+      }));
+
+      setConnectionStatus("Supabase: Connected");
+    }
+
+    async function manualRefresh() {
+      await loadDatabase();
+      renderToday();
+      alert("Data refreshed");
     }
 
     async function addPerson() {
@@ -919,15 +930,30 @@
         return;
       }
 
-      todayList.push({
+      isEditingOrSaving = true;
+      setConnectionStatus("Supabase: Saving...");
+
+      const newPerson = {
         id: Date.now(),
         name,
         phone,
-        time,
+        appointment_time: time,
         service,
         price,
         status: "came"
-      });
+      };
+
+      const { error } = await supabaseClient
+        .from("hijama_today")
+        .insert(newPerson);
+
+      if (error) {
+        console.error(error);
+        setConnectionStatus("Supabase: Insert error");
+        alert("Save نەکرا. Supabase Table/Policy هەڵەیە.");
+        isEditingOrSaving = false;
+        return;
+      }
 
       document.getElementById("nameInput").value = "";
       document.getElementById("phoneInput").value = "";
@@ -935,8 +961,11 @@
       document.getElementById("serviceInput").value = "";
       document.getElementById("priceInput").value = "";
 
-      await saveDatabase();
+      await loadDatabase(false);
       renderToday();
+
+      setConnectionStatus("Supabase: Saved");
+      isEditingOrSaving = false;
     }
 
     function getStatusText(status) {
@@ -963,7 +992,7 @@
             </td>
 
             <td>
-              <input type="time" value="${person.time}" onchange="editPerson(${person.id}, 'time', this.value)">
+              <input type="time" value="${person.time}" onchange="editPerson(${person.id}, 'appointment_time', this.value)">
             </td>
 
             <td>
@@ -998,28 +1027,61 @@
     }
 
     async function editPerson(id, key, value) {
-      todayList = todayList.map(person => {
-        if (person.id === id) {
-          return {
-            ...person,
-            [key]: key === "price" ? Number(value) : value
-          };
-        }
+      isEditingOrSaving = true;
+      setConnectionStatus("Supabase: Updating...");
 
-        return person;
-      });
+      const updateData = {};
 
-      await saveDatabase();
+      if (key === "price") {
+        updateData[key] = Number(value);
+      } else {
+        updateData[key] = value;
+      }
+
+      const { error } = await supabaseClient
+        .from("hijama_today")
+        .update(updateData)
+        .eq("id", id);
+
+      if (error) {
+        console.error(error);
+        setConnectionStatus("Supabase: Update error");
+        alert("Update نەکرا");
+        isEditingOrSaving = false;
+        return;
+      }
+
+      await loadDatabase(false);
       renderToday();
+
+      setConnectionStatus("Supabase: Updated");
+      isEditingOrSaving = false;
     }
 
     async function deletePerson(id) {
       if (!confirm("دڵنیایت دەتەوێت ئەم کەسە بسڕیتەوە؟")) return;
 
-      todayList = todayList.filter(person => person.id !== id);
+      isEditingOrSaving = true;
+      setConnectionStatus("Supabase: Deleting...");
 
-      await saveDatabase();
+      const { error } = await supabaseClient
+        .from("hijama_today")
+        .delete()
+        .eq("id", id);
+
+      if (error) {
+        console.error(error);
+        setConnectionStatus("Supabase: Delete error");
+        alert("Delete نەکرا");
+        isEditingOrSaving = false;
+        return;
+      }
+
+      await loadDatabase(false);
       renderToday();
+
+      setConnectionStatus("Supabase: Deleted");
+      isEditingOrSaving = false;
     }
 
     function updateStats() {
@@ -1043,6 +1105,9 @@
         return;
       }
 
+      isEditingOrSaving = true;
+      setConnectionStatus("Supabase: Saving report...");
+
       const info = getDateInfo();
 
       const camePeople = todayList.filter(p => p.status === "came").length;
@@ -1052,19 +1117,34 @@
         .filter(p => p.status === "came")
         .reduce((sum, p) => sum + Number(p.price || 0), 0);
 
-      savedReports.unshift({
+      const report = {
         id: Date.now(),
-        date: info.date,
-        day: info.day,
-        totalPeople: todayList.length,
-        camePeople,
-        missedPeople,
-        totalMoney,
-        list: JSON.parse(JSON.stringify(todayList))
-      });
+        report_date: info.date,
+        report_day: info.day,
+        total_people: todayList.length,
+        came_people: camePeople,
+        missed_people: missedPeople,
+        total_money: totalMoney,
+        list: todayList
+      };
 
-      await saveDatabase();
-      renderReports();
+      const { error } = await supabaseClient
+        .from("hijama_reports")
+        .insert(report);
+
+      if (error) {
+        console.error(error);
+        setConnectionStatus("Supabase: Report error");
+        alert("Report Save نەکرا");
+        isEditingOrSaving = false;
+        return;
+      }
+
+      await loadDatabase(false);
+      renderToday();
+
+      setConnectionStatus("Supabase: Report saved");
+      isEditingOrSaving = false;
 
       alert(`کاری ئەمڕۆ Save کرا\nDate: ${info.date}\nDay: ${info.day}`);
     }
@@ -1098,18 +1178,53 @@
     async function deleteReport(id) {
       if (!confirm("دڵنیایت دەتەوێت ئەم ڕاپۆرتە بسڕیتەوە؟")) return;
 
-      savedReports = savedReports.filter(report => report.id !== id);
+      isEditingOrSaving = true;
+      setConnectionStatus("Supabase: Deleting report...");
 
-      await saveDatabase();
-      renderReports();
+      const { error } = await supabaseClient
+        .from("hijama_reports")
+        .delete()
+        .eq("id", id);
+
+      if (error) {
+        console.error(error);
+        setConnectionStatus("Supabase: Delete report error");
+        alert("Report delete نەکرا");
+        isEditingOrSaving = false;
+        return;
+      }
+
+      await loadDatabase(false);
+      renderToday();
+
+      setConnectionStatus("Supabase: Report deleted");
+      isEditingOrSaving = false;
     }
 
     async function clearToday() {
       if (!confirm("دڵنیایت؟ ئەمە هەموو لیستی ئەمڕۆ دەسڕێتەوە")) return;
 
-      todayList = [];
-      await saveDatabase();
+      isEditingOrSaving = true;
+      setConnectionStatus("Supabase: Clearing today...");
+
+      const { error } = await supabaseClient
+        .from("hijama_today")
+        .delete()
+        .neq("id", 0);
+
+      if (error) {
+        console.error(error);
+        setConnectionStatus("Supabase: Clear error");
+        alert("Clear نەکرا");
+        isEditingOrSaving = false;
+        return;
+      }
+
+      await loadDatabase(false);
       renderToday();
+
+      setConnectionStatus("Supabase: Today cleared");
+      isEditingOrSaving = false;
     }
 
     function downloadToday() {
@@ -1167,13 +1282,12 @@
     }
 
     async function startApp() {
-      await openDatabase();
+      loadTheme();
 
-      const loggedIn = await getSetting("loggedIn");
-      await loadTheme();
+      const loggedIn = localStorage.getItem("hijamaLoggedIn");
 
       if (loggedIn === "yes") {
-        showApp();
+        await showApp();
       } else {
         document.getElementById("loginScreen").style.display = "flex";
         document.getElementById("app").style.display = "none";
