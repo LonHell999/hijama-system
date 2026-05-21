@@ -745,6 +745,7 @@
     let todayList = [];
     let savedReports = [];
     let refreshTimer = null;
+    let dateTimer = null;
     let isEditingOrSaving = false;
 
     function setConnectionStatus(text) {
@@ -772,6 +773,11 @@
         refreshTimer = null;
       }
 
+      if (dateTimer) {
+        clearInterval(dateTimer);
+        dateTimer = null;
+      }
+
       document.getElementById("app").style.display = "none";
       document.getElementById("loginScreen").style.display = "flex";
     }
@@ -794,6 +800,12 @@
           }
         }, 6000);
       }
+
+      if (!dateTimer) {
+        dateTimer = setInterval(() => {
+          renderDate();
+        }, 30000);
+      }
     }
 
     function formatMoney(amount) {
@@ -802,26 +814,28 @@
 
     function getDateInfo() {
       const now = new Date();
+
       const date = `${now.getMonth() + 1}/${now.getDate()}/${now.getFullYear()}`;
 
-      const days = [
-        "Sunday",
-        "Monday",
-        "Tuesday",
-        "Wednesday",
-        "Thursday",
-        "Friday",
-        "Saturday"
+      const kurdishDays = [
+        "یەکشەممە",
+        "دووشەممە",
+        "سێشەممە",
+        "چوارشەممە",
+        "پێنجشەممە",
+        "هەینی",
+        "شەممە"
       ];
 
-      const day = days[now.getDay()];
+      const day = kurdishDays[now.getDay()];
+
       return { date, day };
     }
 
     function renderDate() {
       const info = getDateInfo();
       document.getElementById("todayDateText").textContent =
-        `Date: ${info.date} | Day: ${info.day}`;
+        `ڕێکەوت: ${info.date} | ڕۆژ: ${info.day}`;
     }
 
     function changeTheme(theme) {
@@ -915,6 +929,7 @@
     async function manualRefresh() {
       await loadDatabase();
       renderToday();
+      renderDate();
       alert("Data refreshed");
     }
 
@@ -1146,7 +1161,7 @@
       setConnectionStatus("Supabase: Report saved");
       isEditingOrSaving = false;
 
-      alert(`کاری ئەمڕۆ Save کرا\nDate: ${info.date}\nDay: ${info.day}`);
+      alert(`کاری ئەمڕۆ Save کرا\nڕێکەوت: ${info.date}\nڕۆژ: ${info.day}`);
     }
 
     function renderReports() {
@@ -1161,7 +1176,7 @@
       savedReports.forEach(report => {
         box.innerHTML += `
           <div class="saved-day">
-            <strong>Date: ${report.date} | Day: ${report.day || "-"}</strong>
+            <strong>ڕێکەوت: ${report.date} | ڕۆژ: ${report.day || "-"}</strong>
             <p>
               کۆی کەس: ${report.totalPeople} |
               هاتوو: ${report.camePeople} |
@@ -1237,8 +1252,8 @@
 
       let text = "ڕاپۆرتی کاری ئەمڕۆ - باوکی یەحیا\n";
       text += "-----------------------------------\n";
-      text += `Date: ${info.date}\n`;
-      text += `Day: ${info.day}\n`;
+      text += `ڕێکەوت: ${info.date}\n`;
+      text += `ڕۆژ: ${info.day}\n`;
       text += "-----------------------------------\n\n";
 
       todayList.forEach((p, i) => {
@@ -1269,7 +1284,7 @@
       link.download = `hijama-report-${info.date.replaceAll("/", "-")}-${info.day}.txt`;
       link.click();
 
-      alert(`ڕاپۆرت دابەزێندرا\nDate: ${info.date}\nDay: ${info.day}`);
+      alert(`ڕاپۆرت دابەزێندرا\nڕێکەوت: ${info.date}\nڕۆژ: ${info.day}`);
     }
 
     function escapeHtml(text) {
